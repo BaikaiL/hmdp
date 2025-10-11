@@ -17,16 +17,36 @@ import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
 
 @Component
-public class LoginInterceptor implements HandlerInterceptor {
+public class RefreshTokenInterceptor implements HandlerInterceptor {
+
+	@Autowired
+	private StringRedisTemplate stringRedisTemplate;
 
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception{
+		// 从session中获取token
+		String token = request.getHeader("Authorization");
 
-		// 判断是否需要拦截 userholder中是否有用户
-		if(UserHolder.getUser() == null){
-			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-			return false;
+		if(token == null || token.isEmpty()){
+			return true;
 		}
+
+		// 从redis中获取用户
+		String key = LOGIN_USER_KEY+token;
+		Map<Object, Object> userMap = stringRedisTemplate.opsForHash().entries(key);
+		// 判断用户是否存在
+		if(userMap.isEmpty()){
+			return true;
+		}
+		// 将map转为dto对象
+		UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
+
+		// 将查询到的用户添加到threadlocal中
+		UserHolder.saveUser(userDTO);
+
+		// 刷新token有效期
+		stringRedisTemplate.expire(key,LOGIN_USER_TTL, TimeUnit.SECONDS);
+
 		return true;
 	}
 
