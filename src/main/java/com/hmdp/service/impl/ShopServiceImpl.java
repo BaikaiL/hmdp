@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.concurrent.TimeUnit;
 
+import static com.hmdp.utils.ErrorConstants.DATA_DO_NOT_EXIST;
 import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
 import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
 
@@ -49,7 +50,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		Shop shop = getById(id);
 
 		if (shop == null){
-			return Result.fail("店铺不存在");
+			return Result.fail(DATA_DO_NOT_EXIST);
 		}
 
 		// 将shop添加到缓存中

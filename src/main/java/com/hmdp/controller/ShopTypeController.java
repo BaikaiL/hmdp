@@ -27,8 +27,12 @@ public class ShopTypeController {
 
     @GetMapping("list")
     public Result queryTypeList() {
-        List<ShopType> typeList = typeService
-                .query().orderByAsc("sort").list();
-        return Result.ok(typeList);
+
+        // 添加店铺类型的缓存
+//        List<ShopType> typeList = typeService
+//                .query().orderByAsc("sort").list();
+
+        return typeService.queryTypeList();
+
     }
 }
