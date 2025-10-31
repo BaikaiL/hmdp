@@ -39,13 +39,13 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		String key = CACHE_SHOP_KEY + id.toString();
 		String shopJson = stringRedisTemplate.opsForValue().get(key);
 
-		// 存在，直接返回
-		if (StringUtils.isNotBlank(shopJson)) {
+		// 存在（shopJson不为空且不为占位符），直接返回
+		if (StringUtils.isNotBlank(shopJson) && !EMPTY_PLACEHOLDER.equals(shopJson)) {
 			Shop shop = JSONUtil.toBean(shopJson, Shop.class);
 			return Result.ok(shop);
 		}
 
-		// 缓存的值为占位符
+		// 缓存的值为占位符，则说明该数据在数据库中不存在，直接返回错误信息
 		if(EMPTY_PLACEHOLDER.equals(shopJson)){
 			return Result.fail(DATA_DO_NOT_EXIST);
 		}
@@ -54,6 +54,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		Shop shop = getById(id);
 
 		if (shop == null){
+			// 解决缓存穿透问题，缓存占位符
 			stringRedisTemplate.opsForValue().set(key,EMPTY_PLACEHOLDER,CACHE_NULL_TTL,TimeUnit.MINUTES);
 			return Result.fail(DATA_DO_NOT_EXIST);
 		}
