@@ -15,8 +15,7 @@ import org.springframework.stereotype.Service;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.ErrorConstants.DATA_DO_NOT_EXIST;
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
+import static com.hmdp.utils.RedisConstants.*;
 
 
 /**
@@ -46,10 +45,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 			return Result.ok(shop);
 		}
 
-		// 没命中缓存，到数据库里查
+		// 缓存的值为占位符
+		if(EMPTY_PLACEHOLDER.equals(shopJson)){
+			return Result.fail(DATA_DO_NOT_EXIST);
+		}
+
+		// 如果缓存中不存在，到数据库里查
 		Shop shop = getById(id);
 
 		if (shop == null){
+			stringRedisTemplate.opsForValue().set(key,EMPTY_PLACEHOLDER,CACHE_NULL_TTL,TimeUnit.MINUTES);
 			return Result.fail(DATA_DO_NOT_EXIST);
 		}
 
@@ -57,5 +62,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
 		return Result.ok(shop);
+	}
+
+	@Override
+	public Result updateShop(Shop shop) {
+		// 先更新数据库
+		updateById(shop);
+		// 再删除缓存
+		stringRedisTemplate.delete(CACHE_SHOP_KEY + shop.getId());
+		return Result.ok();
 	}
 }
