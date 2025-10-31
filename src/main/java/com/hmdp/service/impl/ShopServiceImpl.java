@@ -2,6 +2,7 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.hmdp.dto.Result;
@@ -9,10 +10,14 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RedisData;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.ErrorConstants.DATA_DO_NOT_EXIST;
@@ -33,6 +38,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 	@Autowired
 	private StringRedisTemplate stringRedisTemplate;
 
+	private static final ExecutorService EXECUTOR_SERVICE = Executors.newFixedThreadPool(10);
+
 	@Override
 	public Result queryById(Long id) {
 
@@ -41,6 +48,50 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 			return Result.fail(DATA_DO_NOT_EXIST);
 		}
 		return Result.ok(shop);
+	}
+
+	// 防止缓存击穿的查询方法，逻辑过期实现
+	public Shop queryWithLogicalExpire(Long id) {
+
+		// 从redis缓存中取
+		String key = CACHE_SHOP_KEY + id.toString();
+		String shopJson = stringRedisTemplate.opsForValue().get(key);
+
+		// 不存在存在（shopJson为空），直接返回
+		if (StringUtils.isNotBlank(shopJson)) {
+			return null;
+		}
+
+		// 存在，判断过期时间
+		//反序列化
+		RedisData redisData = JSONUtil.toBean(shopJson, RedisData.class);
+		Shop shop = JSONUtil.toBean((JSONObject) redisData.getData(), Shop.class);
+		LocalDateTime expire = redisData.getExpireTime();
+
+		if(expire.isAfter(LocalDateTime.now())) {
+			// 未过期，直接返回
+			return shop;
+		}
+		// 过期，缓存重建
+		// 获取锁
+		String lockKey = LOCK_SHOP_KEY + id;
+		boolean isLock = tryLock(lockKey);
+
+		// 获取锁成功
+		if(isLock){
+			try {
+				EXECUTOR_SERVICE.submit(()->{
+					this.saveData2Redis(id,1800L);
+				});
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			} finally {
+				unLock(lockKey);
+			}
+		}
+
+		// 获取锁失败，返回旧数据
+		return shop;
 	}
 
 	// 防止缓存击穿的查询方法，互斥锁实现
@@ -62,7 +113,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
 		// 尝试获取锁
 		Shop shop = null;
-		String lockKey = "lock:shop" + id;
+		String lockKey = LOCK_SHOP_KEY + id;
 		try {
 
 			boolean isLock = tryLock(lockKey);
@@ -103,7 +154,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		String shopJson = stringRedisTemplate.opsForValue().get(key);
 
 		// 存在（shopJson不为空且不为占位符），直接返回
-		if (StringUtils.isNotBlank(shopJson) && !EMPTY_PLACEHOLDER.equals(shopJson)) {
+		if (!StringUtils.isNotBlank(shopJson) && !EMPTY_PLACEHOLDER.equals(shopJson)) {
 			return JSONUtil.toBean(shopJson, Shop.class);
 		}
 
@@ -135,6 +186,20 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 		stringRedisTemplate.delete(CACHE_SHOP_KEY + shop.getId());
 		return Result.ok();
 	}
+
+	public void saveData2Redis(Long id, Long expireSeconds){
+		// 获取店铺信息
+		Shop shop = getById(id);
+
+		// 设置逻辑过期时间
+		RedisData redisData = new RedisData();
+		redisData.setData(shop);
+		redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSeconds));
+
+		// 写入缓存
+		stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(redisData));
+	}
+
 
 	// 获取锁的方法
 	private boolean tryLock(String key){
