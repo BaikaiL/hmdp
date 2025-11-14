@@ -3,12 +3,13 @@
 --- Created by liang.
 --- DateTime: 2025/11/13 16:23
 ---
--- 参数列表 1.优惠券id 2.用户id
+-- 参数列表 1.优惠券id 2.用户id 3.订单id
 -- 数据key 1.stock 2.订单id
 local voucherId = ARGV[1]
 local userId = ARGV[2]
+local orderId = ARGV[3]
 local stockKey = 'seckill:stock:' .. voucherId
-local orderId = 'seckill:order:' .. voucherId
+local orderKey = 'seckill:order:' .. voucherId
 
 -- 判断库存是否充足
 if (tonumber(redis.call('get', stockKey)) <= 0) then
@@ -16,11 +17,13 @@ if (tonumber(redis.call('get', stockKey)) <= 0) then
 end
 
 -- 判断是否重复下单
-if (redis.call('sismember', orderId, userId)) then
+if (redis.call('sismember', orderKey, userId)) then
     return 2
 end
 
 -- 扣减库存，将用户添加到set中
 redis.call('incrby', stockKey, -1)
-redis.call('sadd', orderId, userId)
+redis.call('sadd', orderKey, userId)
+-- 发送到消息队列中
+redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
 return 0
