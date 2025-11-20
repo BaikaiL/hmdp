@@ -14,6 +14,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -58,6 +59,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 	private RedissonClient redissonClient;
 
 	private final static DefaultRedisScript<Long> SECKILL_SCRIPT;
+	private static final String STREAM_KEY = "stream.orders";
 	private IVoucherOrderService proxy;
 
 	//阻塞队列
@@ -67,7 +69,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 	private final static ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
 
 	private class SeckillOrderHandle implements Runnable{
-		String queueName = "stream.orders";
+		String queueName = STREAM_KEY;
 		@Override
 		public void run() {
 			while (true){
@@ -125,12 +127,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 					// 进行ack却确认 SACK stream.order g1 id
 					stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
 				} catch (Exception e) {
-					log.error("处理pending-list异常", e);
-					try {
-						Thread.sleep(20);
-					} catch (InterruptedException ex) {
-						throw new RuntimeException(ex);
-					}
+					log.error("处理pending-list异常，已跳过该消息");
+					break;
 				}
 			}
 		}
@@ -172,7 +170,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
 	@PostConstruct
 	private void init(){
+		initStream();
 		SECKILL_ORDER_EXECUTOR.submit(new SeckillOrderHandle());
+	}
+
+	private void initStream() {
+		String queueName = STREAM_KEY;
+		Boolean exists = stringRedisTemplate.hasKey(queueName);
+		if (Boolean.FALSE.equals(exists)) {
+			stringRedisTemplate.opsForStream().add(
+					StreamRecords.mapBacked(Collections.singletonMap("init", "init"))
+							.withStreamKey(queueName)
+			);
+		}
+		try {
+			stringRedisTemplate.opsForStream().createGroup(queueName, ReadOffset.from("0"), "g1");
+		} catch (RedisSystemException e) {
+			String message = e.getMessage();
+			if (message == null || !message.contains("BUSYGROUP")) {
+				throw e;
+			}
+		}
 	}
 
 	static {
