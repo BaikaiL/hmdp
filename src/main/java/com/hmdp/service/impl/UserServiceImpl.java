@@ -112,4 +112,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 		baseMapper.insert(user);
 		return user;
 	}
+
+
 }
