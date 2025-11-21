@@ -200,7 +200,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
 		// 4.查询对应id的笔记，设置笔记的发布者和点赞数
 		String strIds = StrUtil.join(",", ids);
-		List<Blog> blogs = query().in("id", ids).last("ORDER BY FILED(id," + strIds + ")").list();
+		List<Blog> blogs = query().in("id", ids).last("ORDER BY FIELD(id," + strIds + ")").list();
 		for (Blog blog : blogs) {
 			setBlogUser(blog);
 			isBlogLiked(blog);
